@@ -1,12 +1,14 @@
-# DHCPSwitches
+# gregIPAM
 
-> **Gamified networking systems for _Data Center_ (Unity/IL2CPP, MelonLoader).**
+> **Gamified DHCP and IPAM for _Data Center_ (Unity/IL2CPP, MelonLoader).**
+
+This repository is **`gregIPAM`** in the `gregFramework` workspace: it covers **DHCP** and **IPAM** features. The shipped .NET assembly and root namespace remain **`DHCPSwitches`** (`DHCPSwitches.csproj`) for compatibility with existing installs and docs.
 
 ---
 
 ## Overview
 
-`DHCPSwitches` is a gameplay-focused mod project for **Data Center** that expands network management depth while keeping the experience practical and fun.
+`DHCPSwitches` is the gameplay-focused mod project for **Data Center** that expands network management depth while keeping the experience practical and fun.
 
 The project focuses on:
 
