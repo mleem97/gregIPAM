@@ -1,111 +1,86 @@
 # gregIPAM
 
-> **Gamified DHCP and IPAM for _Data Center_ (Unity/IL2CPP, MelonLoader).**
+Gamified **DHCP** and **IPAM** for **Data Center** (Unity/IL2CPP, MelonLoader). The shipped .NET assembly and root namespace remain **`DHCPSwitches`** (`DHCPSwitches.csproj`) for compatibility with existing installs and documentation.
 
-This repository is **`gregIPAM`** in the `gregFramework` workspace: it covers **DHCP** and **IPAM** features. The shipped .NET assembly and root namespace remain **`DHCPSwitches`** (`DHCPSwitches.csproj`) for compatibility with existing installs and docs.
+---
+
+## Part of gregFramework
+
+This directory is part of the **[gregFramework](https://github.com/mleem97/gregFramework)** workspace. Clone sibling repositories side by side so each project lives at `gregFramework/<RepoName>/`. See the workspace [README](https://github.com/mleem97/gregFramework/blob/master/README.md) for the full layout and migration notes.
+
+**Remote:** [`mleem97/DataCenter_DHCPSwitches`](https://github.com/mleem97/DataCenter_DHCPSwitches) — on-disk path: `gregFramework/gregIPAM/`.
 
 ---
 
 ## Overview
 
-`DHCPSwitches` is the gameplay-focused mod project for **Data Center** that expands network management depth while keeping the experience practical and fun.
-
-The project focuses on:
-
-- Better in-game IP assignment UX
-- DHCP scope management (`VLAN` / `Switch` / `Global`)
-- VLAN-aware operations and management network concepts
-- Patch-port labeling and topology clarity
-- Shared server / multi-tenant gameplay concepts
-- Progressive roadmap toward a semi-full gamified IPAM layer
+Focus: better IP/DHCP gameplay, VLAN and scope concepts, patch-port labeling, roadmap toward IPAM — see **`ROADMAP.md`**.
 
 ---
 
-## Current Status
+## Tech stack
 
-- Roadmap-first planning is active.
-- Main plan is documented in `ROADMAP.md`.
-- Core mod code targets `net6.0` and MelonLoader + IL2CPP interop.
-
----
-
-## Tech Stack
-
-- **Game:** Data Center
-- **Runtime:** MelonLoader (`0.7.2+` target)
-- **Interop:** Il2CppInterop
-- **Language:** C# / .NET 6
-- **Patching:** Harmony
+| | |
+|:---|:---|
+| **Game** | Data Center |
+| **Loader** | MelonLoader (`0.7.2+` target) |
+| **Interop** | Il2CppInterop |
+| **Language** | C# / .NET 6 |
+| **Patching** | Harmony |
 
 ---
 
-## Repository Structure
+## Repository structure
 
-- **`docs/SOURCE_LAYOUT.md`** — folder-by-folder map of all C# sources
-- **`StreamingAssets.Mods/DataCenter_Router/`** — passive shop `config.json` template for a dedicated **router** item (copy into `Data Center_Data/StreamingAssets/Mods/`; add mesh/textures from your game files)
-- **`Core/`** — MelonLoader entry (`Main.cs`, `MelonModInfo.cs`, …)
-- **`Networking/`** — DHCP, reachability/L3, subnets, `RouteMath`, device classification
-- **`Ipam/`** — IPAM overlay (`IPAMOverlay.cs`), `LicenseManager`
-- **`Cli/`**, **`Config/`**, **`Routing/`**, **`Ping/`**, **`Patches/`**, **`Input/`**, **`Diagnostics/`** — see `docs/SOURCE_LAYOUT.md`
-- `ROADMAP.md` — phased implementation roadmap
-- `.github/copilot-instructions.md` — project-specific guidance
+- **`docs/SOURCE_LAYOUT.md`** — folder overview
+- **`StreamingAssets.Mods/DataCenter_Router/`** — passive shop `config.json` template (see docs)
+- **`Core/`** — MelonLoader entry (`Main.cs`, …)
+- **`Networking/`**, **`Ipam/`**, **`Cli/`**, **`Config/`**, … — details in `docs/SOURCE_LAYOUT.md`
 
 ---
 
-## Getting Started (Development)
+## Development
 
-### 1) Requirements
+### Prerequisites
 
-- Windows + Steam version of **Data Center**
+- Windows + **Data Center** (Steam)
 - .NET SDK 6.x
-- Visual Studio 2022/2026 or compatible C# IDE
-- MelonLoader installed for the target game
+- MelonLoader for the target build
 
-### 2) Clone
+### Clone
 
 ```bash
-git clone https://github.com/mleem97/DataCenter_DHCPSwitches.git
-cd DataCenter_DHCPSwitches
+git clone https://github.com/mleem97/DataCenter_DHCPSwitches.git gregIPAM
+cd gregIPAM
 ```
 
-### 3) Configure Local References
+You may already have a local copy under `gregFramework/gregIPAM/`.
 
-`DHCPSwitches.csproj` references **MelonLoader** (`MelonLoader\net6`) and IL2CPP stubs (`MelonLoader\Il2CppAssemblies`, with fallback to `BepInEx\interop`).  
-Point `DataCenterGameDir` in `Directory.Build.props` at your game folder (or override with `dotnet build -p:DataCenterGameDir="..."`).
+### References
 
-### 4) Build
+`DHCPSwitches.csproj` references MelonLoader/IL2CPP stubs. Set `DataCenterGameDir` in `Directory.Build.props` to your game directory, or:
+
+`dotnet build -p:DataCenterGameDir="..."`
+
+### Build
 
 ```bash
 dotnet build
 ```
 
-### 5) Deploy
-
-Copy the built mod DLL to your game `Mods` folder.
+Deploy the DLL to `Mods/`.
 
 ---
 
 ## Roadmap
 
-Implementation planning is maintained in:
-
 - [`ROADMAP.md`](./ROADMAP.md)
-
-This includes release phases, epics, risks, testing strategy, and sprint-ready tasks.
 
 ---
 
-## Contributing
-
-Please read:
+## Contributing / license
 
 - [`CONTRIBUTING.md`](./CONTRIBUTING.md)
 - [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md)
 - [`SECURITY.md`](./SECURITY.md)
-
----
-
-## License
-
-This project is licensed under the **MIT License**.  
-See [`LICENSE`](./LICENSE) for full text.
+- License: **MIT** — [`LICENSE`](./LICENSE)
