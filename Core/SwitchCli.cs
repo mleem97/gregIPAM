@@ -37,6 +37,8 @@ public static class SwitchCli
         new CliCommand { Name = "show interfaces", Syntax = "show interfaces", Description = "Show all ports", Handler = (_, s) => CmdShowInterfaces() },
         new CliCommand { Name = "show vlan", Syntax = "show vlan [id]", Description = "Show vlan overview", Handler = CmdShowVlan },
         new CliCommand { Name = "show status", Syntax = "show status", Description = "Show compact switch status", Handler = (_, s) => CmdShowStatus() },
+        new CliCommand { Name = "show dhcp", Syntax = "show dhcp", Description = "Show DHCP runtime mode/status", Handler = (_, s) => CmdShowDhcp() },
+        new CliCommand { Name = "dhcp mode", Syntax = "dhcp mode {sequential|lowest|random}", Description = "Set DHCP assignment strategy", Handler = CmdDhcpMode },
         new CliCommand { Name = "configure terminal", Syntax = "configure terminal", Description = "Enter global config mode", Aliases = new[] { "conf t" }, Handler = (_, s) => CmdConfigureTerminal() },
         new CliCommand { Name = "interface", Syntax = "interface <portIndex>", Description = "Enter interface config mode", Handler = CmdInterface },
         new CliCommand { Name = "switchport mode", Syntax = "switchport mode {access|trunk}", Description = "Set port mode", Handler = CmdSwitchportMode },
@@ -377,7 +379,43 @@ public static class SwitchCli
 
         var ports = ActiveSwitch.cableLinkSwitchPorts?.Count ?? 0;
         var flow = DHCPManager.IsFlowPaused ? "Paused" : "Running";
-        return $"{ActiveSwitch.switchId} | {(ActiveSwitch.isOn ? "UP" : "DOWN")} | ports={ports} | Flow={flow}";
+        return $"{ActiveSwitch.switchId} | {(ActiveSwitch.isOn ? "UP" : "DOWN")} | ports={ports} | Flow={flow} | DHCPMode={DHCPManager.DhcpAssignMode}";
+    }
+
+    private static string CmdShowDhcp()
+    {
+        var flow = DHCPManager.IsFlowPaused ? "Paused" : "Running";
+        return $"DHCP flow={flow} empty-autofill={DHCPManager.EmptyIpAutoFillEnabled} assign-mode={DHCPManager.DhcpAssignMode}";
+    }
+
+    private static string CmdDhcpMode(string[] args, CliSession _)
+    {
+        if (args.Length < 3)
+        {
+            return "% Error: syntax: dhcp mode {sequential|lowest|random}";
+        }
+
+        var token = args[2].Trim().ToLowerInvariant();
+        AssignMode mode;
+        switch (token)
+        {
+            case "sequential":
+                mode = AssignMode.Sequential;
+                break;
+            case "lowest":
+            case "lowestfirst":
+            case "lowest-first":
+                mode = AssignMode.LowestFirst;
+                break;
+            case "random":
+                mode = AssignMode.Random;
+                break;
+            default:
+                return $"% Error: unsupported dhcp mode '{token}'";
+        }
+
+        DHCPManager.SetAssignMode(mode);
+        return $"DHCP assign mode set to {mode}";
     }
 
     private static string CmdShutdown(bool down)

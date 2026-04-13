@@ -2,6 +2,8 @@
 
 Thanks for your interest in improving `DHCPSwitches`.
 
+Maintainer team: **teamGreg - mleem97 & mochimus**.
+
 ---
 
 ## Ground Rules

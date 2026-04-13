@@ -4,6 +4,8 @@ using System.Collections.Generic;
 using System.Reflection;
 using System.Text;
 using System.Threading;
+using DHCPSwitches.Models;
+using greg.Sdk.Services;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using UnityEngine;
 
@@ -11,6 +13,9 @@ namespace DHCPSwitches;
 
 public static class DHCPManager
 {
+    private const string ConfigStoreModName = "gregIPAM";
+    private const string ConfigDhcpAssignModeKey = "dhcp.assign.mode";
+
     private static readonly HashSet<string> AssignedIPs = new();
 
     /// <summary>
@@ -23,6 +28,8 @@ public static class DHCPManager
     internal static bool SuppressEmptyIpAutoAssign { get; private set; }
 
     public static bool IsFlowPaused { get; private set; }
+
+    public static AssignMode DhcpAssignMode { get; private set; } = LoadAssignMode();
 
     /// <summary>Set when <see cref="SetServerIP"/> rejects or the game throws (shown in IPAM).</summary>
     public static string LastSetIpError { get; private set; }
@@ -48,6 +55,60 @@ public static class DHCPManager
                 : "IPAM: sim flow RUNNING — AddAppPerformance prefix will run (L3 enforcement applies when L3 is ON).");
     }
 
+    public static void SetAssignMode(AssignMode mode)
+    {
+        DhcpAssignMode = mode;
+        SaveAssignMode(mode);
+        ModLogging.Msg($"DHCP assign mode set to {DhcpAssignMode}.");
+    }
+
+    private static AssignMode LoadAssignMode()
+    {
+        try
+        {
+            var token = GregPersistenceService.Load(ConfigStoreModName, ConfigDhcpAssignModeKey, "lowestfirst");
+            return ParseAssignMode(token);
+        }
+        catch
+        {
+            return AssignMode.LowestFirst;
+        }
+    }
+
+    private static void SaveAssignMode(AssignMode mode)
+    {
+        try
+        {
+            GregPersistenceService.Save(ConfigStoreModName, ConfigDhcpAssignModeKey, mode.ToString());
+        }
+        catch
+        {
+            // ignored
+        }
+    }
+
+    private static AssignMode ParseAssignMode(string token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return AssignMode.LowestFirst;
+        }
+
+        var t = token.Trim().ToLowerInvariant();
+        switch (t)
+        {
+            case "sequential":
+                return AssignMode.Sequential;
+            case "random":
+                return AssignMode.Random;
+            case "lowest":
+            case "lowestfirst":
+            case "lowest-first":
+            default:
+                return AssignMode.LowestFirst;
+        }
+    }
+
     public static void AssignAllServers()
     {
         if (!LicenseManager.IsDHCPUnlocked)
@@ -60,36 +121,36 @@ public static class DHCPManager
         try
         {
 
-        var servers = UnityEngine.Object.FindObjectsOfType<Server>();
-        RebuildAssignedIpsFromScene(servers);
+            var servers = UnityEngine.Object.FindObjectsOfType<Server>();
+            RebuildAssignedIpsFromScene(servers);
 
-        var assigned = 0;
-        foreach (var server in servers)
-        {
-            var ip = GetServerIP(server);
-            if (!string.IsNullOrWhiteSpace(ip) && ip != "0.0.0.0")
+            var assigned = 0;
+            foreach (var server in servers)
             {
-                continue;
+                var ip = GetServerIP(server);
+                if (!string.IsNullOrWhiteSpace(ip) && ip != "0.0.0.0")
+                {
+                    continue;
+                }
+
+                var newIp = GetNextFreeIpForServer(server, servers);
+                if (string.IsNullOrEmpty(newIp))
+                {
+                    continue;
+                }
+
+                if (SetServerIP(server, newIp, skipUsableListCheck: true))
+                {
+                    AssignedIPs.Add(newIp);
+                    assigned++;
+                }
             }
 
-            var newIp = GetNextFreeIpForServer(server, servers);
-            if (string.IsNullOrEmpty(newIp))
+            if (assigned > 0)
             {
-                continue;
+                ModLogging.Msg($"DHCP: {assigned} IPs assigned.");
+                IPAMOverlay.InvalidateDeviceCache();
             }
-
-            if (SetServerIP(server, newIp, skipUsableListCheck: true))
-            {
-                AssignedIPs.Add(newIp);
-                assigned++;
-            }
-        }
-
-        if (assigned > 0)
-        {
-            ModLogging.Msg($"DHCP: {assigned} IPs assigned.");
-            IPAMOverlay.InvalidateDeviceCache();
-        }
 
         }
         finally
@@ -133,54 +194,54 @@ public static class DHCPManager
         ModDebugLog.EnterDhcpResolutionBatch();
         try
         {
-        var allServers = sceneArr ?? UnityEngine.Object.FindObjectsOfType<Server>();
-        RebuildAssignedIpsFromScene(allServers);
-        ModDebugLog.WriteDhcpAssign($"after RebuildAssignedIpsFromScene in-use IP slots={AssignedIPs.Count}");
+            var allServers = sceneArr ?? UnityEngine.Object.FindObjectsOfType<Server>();
+            RebuildAssignedIpsFromScene(allServers);
+            ModDebugLog.WriteDhcpAssign($"after RebuildAssignedIpsFromScene in-use IP slots={AssignedIPs.Count}");
 
-        var n = 0;
-        foreach (var server in servers)
-        {
-            if (server == null)
+            var n = 0;
+            foreach (var server in servers)
             {
-                continue;
+                if (server == null)
+                {
+                    continue;
+                }
+
+                var ip = GetServerIP(server);
+                if (!string.IsNullOrWhiteSpace(ip) && ip != "0.0.0.0")
+                {
+                    ModDebugLog.WriteDhcpAssign($"skip {FormatServerLogLabel(server)} (already has ip={ip})");
+                    continue;
+                }
+
+                var newIp = GetNextFreeIpForServer(server, allServers);
+                if (string.IsNullOrEmpty(newIp))
+                {
+                    ModDebugLog.WriteDhcpAssign(
+                        $"no address {FormatServerLogLabel(server)} reason={ExplainDhcpMiss(server, allServers)}");
+                    continue;
+                }
+
+                if (!SetServerIP(server, newIp, skipUsableListCheck: true))
+                {
+                    ModDebugLog.WriteDhcpAssign(
+                        $"SetIP failed {FormatServerLogLabel(server)} candidate={newIp} LastSetIpError={LastSetIpError ?? "(null)"}");
+                    continue;
+                }
+
+                AssignedIPs.Add(newIp);
+                n++;
+                ModDebugLog.WriteDhcpAssign($"assigned {FormatServerLogLabel(server)} -> {newIp}");
             }
 
-            var ip = GetServerIP(server);
-            if (!string.IsNullOrWhiteSpace(ip) && ip != "0.0.0.0")
+            ModDebugLog.WriteDhcpAssign($"AssignDhcpToServers end assignedCount={n}");
+
+            if (n > 0)
             {
-                ModDebugLog.WriteDhcpAssign($"skip {FormatServerLogLabel(server)} (already has ip={ip})");
-                continue;
+                ModLogging.Msg($"DHCP: {n} server(s) assigned.");
+                IPAMOverlay.InvalidateDeviceCache();
             }
 
-            var newIp = GetNextFreeIpForServer(server, allServers);
-            if (string.IsNullOrEmpty(newIp))
-            {
-                ModDebugLog.WriteDhcpAssign(
-                    $"no address {FormatServerLogLabel(server)} reason={ExplainDhcpMiss(server, allServers)}");
-                continue;
-            }
-
-            if (!SetServerIP(server, newIp, skipUsableListCheck: true))
-            {
-                ModDebugLog.WriteDhcpAssign(
-                    $"SetIP failed {FormatServerLogLabel(server)} candidate={newIp} LastSetIpError={LastSetIpError ?? "(null)"}");
-                continue;
-            }
-
-            AssignedIPs.Add(newIp);
-            n++;
-            ModDebugLog.WriteDhcpAssign($"assigned {FormatServerLogLabel(server)} -> {newIp}");
-        }
-
-        ModDebugLog.WriteDhcpAssign($"AssignDhcpToServers end assignedCount={n}");
-
-        if (n > 0)
-        {
-            ModLogging.Msg($"DHCP: {n} server(s) assigned.");
-            IPAMOverlay.InvalidateDeviceCache();
-        }
-
-        return n;
+            return n;
         }
         finally
         {
@@ -205,32 +266,32 @@ public static class DHCPManager
         ModDebugLog.EnterDhcpResolutionBatch();
         try
         {
-        var allServers = UnityEngine.Object.FindObjectsOfType<Server>();
-        RebuildAssignedIpsFromScene(allServers);
-        var newIp = GetNextFreeIpForServer(server, allServers);
-        if (string.IsNullOrEmpty(newIp))
-        {
-            if (server.GetCustomerID() <= 0)
+            var allServers = UnityEngine.Object.FindObjectsOfType<Server>();
+            RebuildAssignedIpsFromScene(allServers);
+            var newIp = GetNextFreeIpForServer(server, allServers);
+            if (string.IsNullOrEmpty(newIp))
             {
-                LastSetIpError = "DHCP failed: this server is not assigned to a customer contract.";
+                if (server.GetCustomerID() <= 0)
+                {
+                    LastSetIpError = "DHCP failed: this server is not assigned to a customer contract.";
+                }
+                else
+                {
+                    LastSetIpError = "DHCP failed: no free address in the contract subnet usable lists for this server.";
+                }
+
+                ModLogging.Warning("DHCP: AssignDhcpToSingleServer found no free IP.");
+                return false;
             }
-            else
+
+            LastSetIpError = null;
+            if (!SetServerIP(server, newIp, skipUsableListCheck: true))
             {
-                LastSetIpError = "DHCP failed: no free address in the contract subnet usable lists for this server.";
+                return false;
             }
 
-            ModLogging.Warning("DHCP: AssignDhcpToSingleServer found no free IP.");
-            return false;
-        }
-
-        LastSetIpError = null;
-        if (!SetServerIP(server, newIp, skipUsableListCheck: true))
-        {
-            return false;
-        }
-
-        IPAMOverlay.InvalidateDeviceCache();
-        return true;
+            IPAMOverlay.InvalidateDeviceCache();
+            return true;
         }
         finally
         {
@@ -481,24 +542,27 @@ public static class DHCPManager
             return null;
         }
 
+        var candidates = new List<string>();
+        for (var i = 0; i < usable.Length; i++)
+        {
+            var one = usable[i];
+            if (!string.IsNullOrWhiteSpace(one))
+            {
+                candidates.Add(one.Trim());
+            }
+        }
+
+        candidates = ApplyAssignModeOrdering(candidates);
+        var total = candidates.Count;
+
         var nEmpty = 0;
         var nInAssigned = 0;
         var nOtherServer = 0;
         var nGatewaySkip = 0;
 
-        for (var i = 0; i < usable.Length; i++)
+        for (var i = 0; i < candidates.Count; i++)
         {
-            var candidate = usable[i];
-            if (string.IsNullOrWhiteSpace(candidate))
-            {
-                nEmpty++;
-                if (logEachReject)
-                {
-                    ModDebugLog.WriteDhcpTrace($"PickFromUsableArray cidr={cidrForLog} idx={i}: empty candidate");
-                }
-
-                continue;
-            }
+            var candidate = candidates[i];
 
             if (AssignedIPs.Contains(candidate))
             {
@@ -536,7 +600,7 @@ public static class DHCPManager
             if (logStep)
             {
                 ModDebugLog.WriteDhcpStep(
-                    $"PickFromUsableArray cidr={cidrForLog}: chose {candidate} idx={i} stats empty={nEmpty} inAssignedPool={nInAssigned} otherServer={nOtherServer} gatewaySkip={nGatewaySkip} totalLen={usable.Length}");
+                    $"PickFromUsableArray cidr={cidrForLog}: chose {candidate} idx={i} stats empty={nEmpty} inAssignedPool={nInAssigned} otherServer={nOtherServer} gatewaySkip={nGatewaySkip} totalLen={total} mode={DhcpAssignMode}");
             }
 
             return candidate;
@@ -545,10 +609,36 @@ public static class DHCPManager
         if (logStep)
         {
             ModDebugLog.WriteDhcpStep(
-                $"PickFromUsableArray cidr={cidrForLog}: no candidate totalLen={usable.Length} empty={nEmpty} inAssignedPool={nInAssigned} otherServer={nOtherServer} gatewaySkip={nGatewaySkip}");
+                $"PickFromUsableArray cidr={cidrForLog}: no candidate totalLen={total} empty={nEmpty} inAssignedPool={nInAssigned} otherServer={nOtherServer} gatewaySkip={nGatewaySkip} mode={DhcpAssignMode}");
         }
 
         return null;
+    }
+
+    private static List<string> ApplyAssignModeOrdering(List<string> source)
+    {
+        var items = source ?? new List<string>();
+        if (items.Count == 0)
+        {
+            return items;
+        }
+
+        switch (DhcpAssignMode)
+        {
+            case AssignMode.Random:
+                {
+                    var rnd = new System.Random();
+                    return items.OrderBy(_ => rnd.Next()).ToList();
+                }
+            case AssignMode.LowestFirst:
+                return items
+                    .Where(GregIpService.IsValidIp)
+                    .OrderBy(GregIpService.IpToInt)
+                    .ToList();
+            case AssignMode.Sequential:
+            default:
+                return items;
+        }
     }
 
     private static string PickFromPrivateLan(string privateCidr, Server server, Server[] allServers)
@@ -576,6 +666,73 @@ public static class DHCPManager
         return null;
     }
 
+    private static string TryGetReservedIpForServer(Server server, Server[] allServers, bool logDetail)
+    {
+        if (server == null)
+        {
+            return null;
+        }
+
+        string serverId;
+        try
+        {
+            serverId = server.serverID;
+        }
+        catch
+        {
+            serverId = null;
+        }
+
+        if (string.IsNullOrWhiteSpace(serverId))
+        {
+            return null;
+        }
+
+        var reservation = LeaseStore.GetReservation(serverId);
+        var reservedIp = reservation?.Ip;
+        if (string.IsNullOrWhiteSpace(reservedIp) || reservedIp == "0.0.0.0")
+        {
+            return null;
+        }
+
+        if (!GregIpService.IsValidIp(reservedIp))
+        {
+            if (logDetail)
+            {
+                ModDebugLog.WriteDhcpStep($"Reservation ignored for {serverId}: invalid IP '{reservedIp}'");
+            }
+
+            return null;
+        }
+
+        if (AssignedIPs.Contains(reservedIp) || IsIpUsedByAnotherServer(server, reservedIp, allServers))
+        {
+            if (logDetail)
+            {
+                ModDebugLog.WriteDhcpStep($"Reservation busy for {serverId}: {reservedIp}");
+            }
+
+            return null;
+        }
+
+        if (!GameSubnetHelper.IsIpAllowedForServer(server, reservedIp))
+        {
+            if (logDetail)
+            {
+                ModDebugLog.WriteDhcpStep($"Reservation out-of-policy for {serverId}: {reservedIp}");
+            }
+
+            return null;
+        }
+
+        if (logDetail)
+        {
+            ModDebugLog.WriteDhcpStep($"Reservation hit for {serverId}: {reservedIp}");
+        }
+
+        return reservedIp;
+    }
+
     private static string GetNextFreeIpForServer(Server server, Server[] allServersCache = null)
     {
         if (server == null)
@@ -591,6 +748,12 @@ public static class DHCPManager
         if (logDetail)
         {
             ModDebugLog.WriteDhcpStep($"--- GetNextFreeIpForServer {FormatServerLogLabel(server)} ---");
+        }
+
+        var reserved = TryGetReservedIpForServer(server, allServers, logDetail);
+        if (!string.IsNullOrWhiteSpace(reserved))
+        {
+            return reserved;
         }
 
         var cb = GameSubnetHelper.FindCustomerBaseForServer(server);

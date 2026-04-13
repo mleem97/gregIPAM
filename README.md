@@ -100,6 +100,12 @@ Please read:
 
 ---
 
+## Maintainers
+
+- **Mod Author Team:** `teamGreg - mleem97 & mochimus`
+
+---
+
 ## License
 
 This project is licensed under the **MIT License**.  
