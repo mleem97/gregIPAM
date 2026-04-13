@@ -96,39 +96,6 @@ public static class DeviceConfigRegistry
     public static bool TryGetPreferredDhcpCidrForServer(Server server, out string cidr)
     {
         cidr = null;
-        if (server == null || !ReachabilityService.EnforcementEnabled)
-        {
-            return false;
-        }
-
-        foreach (var kv in Routers)
-        {
-            var r = kv.Value;
-            foreach (var iface in r.Interfaces)
-            {
-                if (string.IsNullOrWhiteSpace(iface.IpAddress) || string.IsNullOrWhiteSpace(iface.SubnetMask))
-                {
-                    continue;
-                }
-
-                if (!RouteMath.TryParseIpv4(iface.IpAddress, out var ip)
-                    || !RouteMath.TryParseSubnetMaskField(iface.SubnetMask, out var mask))
-                {
-                    continue;
-                }
-
-                var network = ip & mask;
-                var len = RouteMath.MaskToPrefixLength(mask);
-                if (len < 0)
-                {
-                    continue;
-                }
-
-                cidr = $"{RouteMath.FormatIpv4(network)}/{len}";
-                return true;
-            }
-        }
-
         return false;
     }
 }

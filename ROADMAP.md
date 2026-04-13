@@ -2,15 +2,12 @@
 
 ## Scope & Vision
 
-Build a **semi-full, gamified IPAM and network operations layer** for Data Center with:
+Build a **gamified IPAM and network operations layer** for Data Center with:
 
-- VLAN-aware network management
-- DHCP scopes at VLAN/switch/global levels
 - improved in-game IP assignment UX
+- DHCP scopes
 - shared multi-tenant server model
-- patch-port labeling
-- management network/management ports
-- optional advanced mode concepts (vPC/MLAG simulation, lab integration concepts)
+- optional advanced mode concepts
 
 ---
 
@@ -41,13 +38,10 @@ Build a **semi-full, gamified IPAM and network operations layer** for Data Cente
 - `Assign Next Free` action.
 - Collision prevention and subnet validation feedback.
 
-### Epic B — DHCP Scope Hierarchy
+### Epic B — DHCP Scope Management
 
-- DHCP scopes configurable at:
-  - VLAN level
-  - Switch level
-  - Global/network level
-- Clear precedence model: `VLAN > Switch > Global`.
+- DHCP scopes configurable
+- Clear precedence model.
 - Reservations and exclusion ranges.
 - Scope exhaustion warnings.
 
