@@ -39,7 +39,7 @@ internal static class InputSystemUiCancelPatches
 
         private static bool Prefix()
         {
-            return !DeviceTerminalOverlay.IsVisible && !IPAMOverlay.IsVisible;
+            return !IPAMOverlay.IsVisible;
         }
     }
 }

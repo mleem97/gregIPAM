@@ -63,6 +63,10 @@ project.lock.json
 project.fragment.lock.json
 artifacts/
 
+# Local exports / game asset copies — not part of mod source
+exports/
+StreamingAssets.Mods/
+
 # ASP.NET Scaffolding
 ScaffoldingReadMe.txt
 

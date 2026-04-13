@@ -11,11 +11,9 @@
 The project focuses on:
 
 - Better in-game IP assignment UX
-- DHCP scope management (`VLAN` / `Switch` / `Global`)
-- VLAN-aware operations and management network concepts
-- Patch-port labeling and topology clarity
+- DHCP scope management
 - Shared server / multi-tenant gameplay concepts
-- Progressive roadmap toward a semi-full gamified IPAM layer
+- Progressive roadmap toward a gamified IPAM layer
 
 ---
 
@@ -40,11 +38,10 @@ The project focuses on:
 ## Repository Structure
 
 - **`docs/SOURCE_LAYOUT.md`** — folder-by-folder map of all C# sources
-- **`StreamingAssets.Mods/DataCenter_Router/`** — passive shop `config.json` template for a dedicated **router** item (copy into `Data Center_Data/StreamingAssets/Mods/`; add mesh/textures from your game files)
 - **`Core/`** — MelonLoader entry (`Main.cs`, `MelonModInfo.cs`, …)
-- **`Networking/`** — DHCP, reachability/L3, subnets, `RouteMath`, device classification
+- **`Networking/`** — DHCP, subnets, device helpers
 - **`Ipam/`** — IPAM overlay (`IPAMOverlay.cs`), `LicenseManager`
-- **`Cli/`**, **`Config/`**, **`Routing/`**, **`Ping/`**, **`Patches/`**, **`Input/`**, **`Diagnostics/`** — see `docs/SOURCE_LAYOUT.md`
+- **`Config/`**, **`Patches/`**, **`Input/`**, **`Diagnostics/`** — see `docs/SOURCE_LAYOUT.md`
 - `ROADMAP.md` — phased implementation roadmap
 - `.github/copilot-instructions.md` — project-specific guidance
 

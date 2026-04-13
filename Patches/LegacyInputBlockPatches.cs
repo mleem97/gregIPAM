@@ -16,13 +16,7 @@ internal static class LegacyInputBlockPatches
 
     private static bool ShouldBlock(KeyCode key)
     {
-        var cli = DeviceTerminalOverlay.IsVisible;
         var ipam = IPAMOverlay.IsVisible;
-
-        if (cli)
-        {
-            return key is KeyCode.Escape or KeyCode.P or KeyCode.Tab;
-        }
 
         // F1 toggles IPAM; suppress legacy F1 while IPAM is open and on the frame we handled the toggle.
         if (key == KeyCode.F1
@@ -118,10 +112,7 @@ internal static class LegacyInputBlockPatches
 
         private static void Postfix(string buttonName, ref bool __result)
         {
-            if (DeviceTerminalOverlay.IsVisible && IsVirtualCancelButton(buttonName))
-            {
-                __result = false;
-            }
+            // No CLI
         }
     }
 
@@ -138,10 +129,7 @@ internal static class LegacyInputBlockPatches
 
         private static void Postfix(string buttonName, ref bool __result)
         {
-            if (DeviceTerminalOverlay.IsVisible && IsVirtualCancelButton(buttonName))
-            {
-                __result = false;
-            }
+            // No CLI
         }
     }
 
@@ -158,10 +146,7 @@ internal static class LegacyInputBlockPatches
 
         private static void Postfix(string buttonName, ref bool __result)
         {
-            if (DeviceTerminalOverlay.IsVisible && IsVirtualCancelButton(buttonName))
-            {
-                __result = false;
-            }
+            // No CLI
         }
     }
 
