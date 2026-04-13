@@ -467,19 +467,27 @@ public static class SwitchCli
             return "% Warning: no servers discovered";
         }
 
-        var sb = new StringBuilder();
-        sb.AppendLine("Port   Server               IP               Customer App VLAN Source");
-        sb.AppendLine(Divider);
-        for (var i = 0; i < endpoints.Count; i++)
+        var ordered = endpoints
+            .Where(e => e != null && !string.IsNullOrWhiteSpace(e.Ip))
+            .OrderBy(e => e.PortIndex < 0 ? int.MaxValue : e.PortIndex)
+            .ThenBy(e => e.ServerId ?? "", StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (ordered.Count == 0)
         {
-            var e = endpoints[i];
-            if (e == null || string.IsNullOrWhiteSpace(e.Ip))
-            {
-                continue;
-            }
+            return "% Warning: no servers discovered";
+        }
+
+        var sb = new StringBuilder();
+        sb.AppendLine("Port   Switch          Server               IP               Customer App VLAN Source");
+        sb.AppendLine(Divider);
+        for (var i = 0; i < ordered.Count; i++)
+        {
+            var e = ordered[i];
 
             var port = e.PortIndex >= 0 ? e.PortIndex.ToString() : "n/a";
-            sb.AppendLine($"{port,-6} {e.ServerId,-20} {e.Ip,-16} {e.CustomerId,8} {e.AppId,3} {e.VlanId,4} {e.Source}");
+            var sw = string.IsNullOrWhiteSpace(e.SwitchId) ? "-" : e.SwitchId;
+            sb.AppendLine($"{port,-6} {sw,-15} {e.ServerId,-20} {e.Ip,-16} {e.CustomerId,8} {e.AppId,3} {e.VlanId,4} {e.Source}");
         }
 
         return sb.ToString().TrimEnd();
@@ -492,50 +500,37 @@ public static class SwitchCli
             return ErrorNoActiveSwitch;
         }
 
-        try
+        var endpoints = ServerScanAdapter.GetSwitchEndpoints(ActiveSwitch);
+        var ordered = endpoints
+            .Where(e => e != null && !string.IsNullOrWhiteSpace(e.Ip))
+            .OrderBy(e => e.PortIndex < 0 ? int.MaxValue : e.PortIndex)
+            .ThenBy(e => e.ServerId ?? "", StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (ordered.Count == 0)
         {
-            var mapType = ActiveSwitch.GetType().Assembly.GetType("NetworkMap") ?? Type.GetType("NetworkMap");
-            if (mapType == null)
-            {
-                return "% Warning: NetworkMap not yet initialized";
-            }
-
-            var instProp = mapType.GetProperty("instance", BindingFlags.Public | BindingFlags.Static)
-                           ?? mapType.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static);
-            var inst = instProp?.GetValue(null);
-            if (inst == null)
-            {
-                return "% Warning: NetworkMap not yet initialized";
-            }
-
-            var adjField = mapType.GetField("adjacencyList", BindingFlags.Public | BindingFlags.Instance | BindingFlags.NonPublic);
-            var adjObj = adjField?.GetValue(inst);
-            if (adjObj is not System.Collections.IEnumerable adj)
-            {
-                return "% Warning: NetworkMap adjacency list unavailable";
-            }
-
-            var sb = new StringBuilder();
-            sb.AppendLine("Neighbor                         Link");
-            sb.AppendLine(Divider);
-            var any = false;
-            foreach (var item in adj)
-            {
-                if (item == null)
-                {
-                    continue;
-                }
-
-                any = true;
-                sb.AppendLine(item.ToString());
-            }
-
-            return any ? sb.ToString().TrimEnd() : "% Warning: no neighbors";
+            return "% Warning: no neighbors";
         }
-        catch (Exception ex)
+
+        var links = ActiveSwitch.cableLinkSwitchPorts;
+        var sb = new StringBuilder();
+        sb.AppendLine("Port   Neighbor Type  Target               IP               Link  VLAN Source");
+        sb.AppendLine(Divider);
+        for (var i = 0; i < ordered.Count; i++)
         {
-            return "% Warning: show neighbors failed: " + ex.Message;
+            var e = ordered[i];
+            var portText = e.PortIndex >= 0 ? e.PortIndex.ToString() : "n/a";
+            var linkState = "?";
+            if (e.PortIndex >= 0 && e.PortIndex < (links?.Count ?? 0))
+            {
+                var link = links[e.PortIndex];
+                linkState = link != null && link.connected ? "UP" : "DOWN";
+            }
+
+            sb.AppendLine($"{portText,-6} {"server",-14} {e.ServerId,-20} {e.Ip,-16} {linkState,-5} {e.VlanId,4} {e.Source}");
         }
+
+        return sb.ToString().TrimEnd();
     }
 
     private static string CmdShowStatus()
