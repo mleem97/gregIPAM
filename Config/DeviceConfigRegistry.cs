@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 
 namespace DHCPSwitches;
@@ -85,10 +86,67 @@ public static class DeviceConfigRegistry
 
     private static void EnsureSwitchDefaults(SwitchRuntimeConfig cfg, int portCount)
     {
+        if (cfg.Vlans == null)
+        {
+            cfg.Vlans = new List<SwitchVlanEntry>();
+        }
+
+        if (cfg.Vlans.Count == 0)
+        {
+            cfg.Vlans.Add(new SwitchVlanEntry { Id = 1, Name = "default" });
+        }
+
+        var seen = new HashSet<int>();
+        cfg.Vlans = cfg.Vlans
+            .Where(v => v != null && v.Id is >= 1 and <= 4094 && seen.Add(v.Id))
+            .OrderBy(v => v.Id)
+            .ToList();
+
+        if (!cfg.Vlans.Any(v => v.Id == 1))
+        {
+            cfg.Vlans.Insert(0, new SwitchVlanEntry { Id = 1, Name = "default" });
+        }
+
         while (cfg.Ports.Count < portCount)
         {
             var i = cfg.Ports.Count;
-            cfg.Ports.Add(new SwitchPortConfig { PortIndex = i, AccessVlan = 1 });
+            cfg.Ports.Add(new SwitchPortConfig { PortIndex = i, AccessVlan = 1, NativeVlan = 1 });
+        }
+
+        for (var i = 0; i < cfg.Ports.Count; i++)
+        {
+            var port = cfg.Ports[i] ?? new SwitchPortConfig();
+            port.PortIndex = i;
+
+            if (port.AccessVlan < 1 || port.AccessVlan > 4094)
+            {
+                port.AccessVlan = 1;
+            }
+
+            if (port.NativeVlan < 1 || port.NativeVlan > 4094)
+            {
+                port.NativeVlan = 1;
+            }
+
+            if (string.IsNullOrWhiteSpace(port.Mode))
+            {
+                port.Mode = port.Trunk ? "trunk" : "access";
+            }
+
+            port.Mode = port.Mode.Trim().ToLowerInvariant();
+            if (port.Mode != "access" && port.Mode != "trunk")
+            {
+                port.Mode = port.Trunk ? "trunk" : "access";
+            }
+
+            port.Trunk = port.Mode == "trunk";
+
+            if (string.IsNullOrWhiteSpace(port.AllowedVlanRaw))
+            {
+                port.AllowedVlanRaw = port.Trunk ? "all" : port.AccessVlan.ToString();
+            }
+
+            cfg.Ports[i] = port;
         }
     }
 

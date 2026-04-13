@@ -794,12 +794,12 @@ public static partial class IPAMOverlay
                 _cachedContentHeight = 260f;
                 return;
             case NavSection.IpAddresses:
-            {
-                var sv = _cachedServers.Length;
-                var y = CardPad + SectionTitleH + 2f + 7f + SectionTitleH + 4f + TableHeaderH + sv * TableRowH + CardPad;
-                _cachedContentHeight = Mathf.Max(220f, y);
-                return;
-            }
+                {
+                    var sv = _cachedServers.Length;
+                    var y = CardPad + SectionTitleH + 2f + 7f + SectionTitleH + 4f + TableHeaderH + sv * TableRowH + CardPad;
+                    _cachedContentHeight = Mathf.Max(220f, y);
+                    return;
+                }
             case NavSection.Prefixes:
                 _cachedContentHeight = 240f;
                 return;
@@ -1111,7 +1111,7 @@ public static partial class IPAMOverlay
         y += SectionTitleH + 10f;
         GUI.Label(
             new Rect(x0, y, w, 100f),
-            "Prefixes follow customer contracts in the base game. Per-VLAN / per-switch DHCP scopes are planned for a future mod release.",
+            "Prefixes follow customer contracts in the base game. VLAN port filtering is active in this mod; per-VLAN / per-switch DHCP scopes are planned next.",
             _stMuted);
     }
 

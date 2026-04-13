@@ -40,6 +40,7 @@ public sealed class SwitchPortConfig
     public int PortIndex;
     public string Mode = "access";
     public int AccessVlan = 1;
+    public int NativeVlan = 1;
     public bool Trunk;
     public string AllowedVlanRaw = "all";
 }

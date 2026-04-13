@@ -72,6 +72,8 @@ public class DHCPSwitchesMod : MelonMod
 
     public override void OnUpdate()
     {
+        VlanRuntimeSync.Tick();
+
         // Melon OnUpdate runs before most Unity behaviours — sync uGUI blocker early so pause menus do not eat the first click under IPAM.
         UiRaycastBlocker.SetBlocking(IPAMOverlay.IsVisible);
 
@@ -83,6 +85,16 @@ public class DHCPSwitchesMod : MelonMod
             {
                 IPAMOverlay.NotifyF1ToggleHandledThisFrame();
                 IPAMOverlay.IsVisible = !IPAMOverlay.IsVisible;
+            }
+
+            if (kb.f9Key.wasPressedThisFrame)
+            {
+                DHCPManager.ToggleFlow();
+            }
+
+            if (kb.f10Key.wasPressedThisFrame)
+            {
+                SwitchCliUI.IsVisible = !SwitchCliUI.IsVisible;
             }
 
             if (kb.leftCtrlKey.isPressed && kb.lKey.wasPressedThisFrame)
@@ -99,6 +111,11 @@ public class DHCPSwitchesMod : MelonMod
         }
 
         // IPAM does not suspend PlayerInput
+    }
+
+    public override void OnApplicationQuit()
+    {
+        DeviceConfigRegistry.TrySaveAllToDisk();
     }
 }
 
@@ -152,6 +169,8 @@ public class DHCPSwitchesBehaviour : MonoBehaviour
             IPAMOverlay.TickIopsCalculatorInputSystem();
             IPAMOverlay.TickOctetInputSystem();
         }
+
+        SwitchCliUI.TickInput();
     }
 
     private void LateUpdate()
@@ -171,6 +190,7 @@ public class DHCPSwitchesBehaviour : MonoBehaviour
     {
         IPAMOverlay.PumpImGuiInputRecovery();
         IPAMOverlay.Draw();
+        SwitchCliUI.Draw();
         if (!IPAMOverlay.IsVisible)
         {
             IPAMOverlay.PumpImGuiInputRecovery();
