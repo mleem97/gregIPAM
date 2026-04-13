@@ -35,12 +35,27 @@ public static class SwitchCli
         new CliCommand { Name = "switch select", Syntax = "switch select {id|index}", Description = "Select active switch", Handler = CmdSwitchSelect },
         new CliCommand { Name = "switch info", Syntax = "switch info", Description = "Show active switch info", Handler = (_, s) => CmdSwitchInfo() },
         new CliCommand { Name = "show interfaces", Syntax = "show interfaces", Description = "Show all ports", Handler = (_, s) => CmdShowInterfaces() },
+        new CliCommand { Name = "show interface", Syntax = "show interface {portIndex}", Description = "Show one interface detail", Handler = CmdShowInterface },
         new CliCommand { Name = "show vlan", Syntax = "show vlan [id]", Description = "Show vlan overview", Handler = CmdShowVlan },
         new CliCommand { Name = "show status", Syntax = "show status", Description = "Show compact switch status", Handler = (_, s) => CmdShowStatus() },
+        new CliCommand { Name = "show running-config", Syntax = "show running-config", Description = "Show switch running config", Handler = (_, s) => CmdShowRunningConfig() },
+        new CliCommand { Name = "show ipam", Syntax = "show ipam", Description = "Show lease view", Handler = (_, s) => CmdShowIpam() },
         new CliCommand { Name = "show dhcp", Syntax = "show dhcp", Description = "Show DHCP runtime mode/status", Handler = (_, s) => CmdShowDhcp() },
+        new CliCommand { Name = "dhcp pool show", Syntax = "dhcp pool show", Description = "Show subnet pool usage", Handler = (_, s) => CmdDhcpPoolShow() },
         new CliCommand { Name = "dhcp mode", Syntax = "dhcp mode {sequential|lowest|random}", Description = "Set DHCP assignment strategy", Handler = CmdDhcpMode },
+        new CliCommand { Name = "dhcp assign", Syntax = "dhcp assign {serverId}", Description = "Assign DHCP to one server", Handler = CmdDhcpAssign },
+        new CliCommand { Name = "dhcp reservation add", Syntax = "dhcp reservation add {serverId} {ip} [note]", Description = "Add DHCP reservation", Handler = CmdDhcpReservationAdd },
+        new CliCommand { Name = "dhcp reservation show", Syntax = "dhcp reservation show [serverId]", Description = "Show DHCP reservation(s)", Handler = CmdDhcpReservationShow },
+        new CliCommand { Name = "dhcp reservation remove", Syntax = "dhcp reservation remove {serverId}", Description = "Remove reservation", Handler = CmdDhcpReservationRemove },
+        new CliCommand { Name = "ipam scan", Syntax = "ipam scan", Description = "Run IPAM scan in current scene", Handler = (_, s) => CmdIpamScan() },
+        new CliCommand { Name = "ipam conflict check", Syntax = "ipam conflict check", Description = "List detected IP/VLAN conflicts", Handler = (_, s) => CmdIpamConflictCheck() },
         new CliCommand { Name = "configure terminal", Syntax = "configure terminal", Description = "Enter global config mode", Aliases = new[] { "conf t" }, Handler = (_, s) => CmdConfigureTerminal() },
         new CliCommand { Name = "interface", Syntax = "interface <portIndex>", Description = "Enter interface config mode", Handler = CmdInterface },
+        new CliCommand { Name = "switchport vlan allow", Syntax = "switchport vlan allow {vlanId}", Description = "Allow VLAN on current port", Handler = CmdSwitchportVlanAllow },
+        new CliCommand { Name = "switchport vlan block", Syntax = "switchport vlan block {vlanId}", Description = "Block VLAN on current port", Handler = CmdSwitchportVlanBlock },
+        new CliCommand { Name = "switchport vlan clear", Syntax = "switchport vlan clear", Description = "Clear VLAN filters on current port", Handler = (_, s) => CmdSwitchportVlanClear() },
+        new CliCommand { Name = "switchport vlan show", Syntax = "switchport vlan show", Description = "Show blocked VLANs on current port", Handler = (_, s) => CmdSwitchportVlanShow() },
+        new CliCommand { Name = "no switchport vlan block", Syntax = "no switchport vlan block {vlanId}", Description = "Alias for allow VLAN on current port", Handler = CmdNoSwitchportVlanBlock },
         new CliCommand { Name = "switchport mode", Syntax = "switchport mode {access|trunk}", Description = "Set port mode", Handler = CmdSwitchportMode },
         new CliCommand { Name = "switchport access vlan", Syntax = "switchport access vlan <id>", Description = "Set access VLAN", Handler = CmdSwitchportAccessVlan },
         new CliCommand { Name = "switchport trunk native vlan", Syntax = "switchport trunk native vlan <id>", Description = "Set trunk native VLAN", Handler = CmdSwitchportTrunkNativeVlan },
@@ -339,6 +354,37 @@ public static class SwitchCli
         return sb.ToString().TrimEnd();
     }
 
+    private static string CmdShowInterface(string[] args, CliSession _)
+    {
+        if (ActiveSwitch == null)
+        {
+            return ErrorNoActiveSwitch;
+        }
+
+        if (args.Length < 3 || !int.TryParse(args[2], out var portIndex))
+        {
+            return "% Error: syntax: show interface {portIndex}";
+        }
+
+        var links = ActiveSwitch.cableLinkSwitchPorts;
+        var count = links?.Count ?? 0;
+        if (portIndex < 0 || portIndex >= count)
+        {
+            return $"% Error: invalid port index {portIndex}";
+        }
+
+        var link = links[portIndex];
+        var blocked = GregVlanService.GetDisallowedVlans(ActiveSwitch, portIndex);
+        var blockedText = blocked.Count == 0 ? "none" : string.Join(",", blocked);
+        return string.Join(
+            "\n",
+            $"Port Index:       {portIndex}",
+            $"Connected:        {(link != null && link.connected)}",
+            $"Speed:            {(link != null ? link.connectionSpeed : 0f):0.0} Gbps",
+            $"Disallowed VLANs: {blockedText}",
+            $"Cable ID:         {(link != null ? link.id.ToString() : "n/a")}");
+    }
+
     private static string CmdShowVlan(string[] args, CliSession _)
     {
         if (ActiveSwitch == null)
@@ -388,6 +434,98 @@ public static class SwitchCli
         return $"DHCP flow={flow} empty-autofill={DHCPManager.EmptyIpAutoFillEnabled} assign-mode={DHCPManager.DhcpAssignMode}";
     }
 
+    private static string CmdShowRunningConfig()
+    {
+        if (!TryGetSwitchConfig(out var cfg, out var portCount, out var error))
+        {
+            return error;
+        }
+
+        var sb = new StringBuilder();
+        sb.AppendLine("!");
+        sb.AppendLine($"hostname {(ActiveSwitch?.switchId ?? "switch")}");
+        sb.AppendLine("!");
+        for (var i = 0; i < portCount; i++)
+        {
+            var p = i < cfg.Ports.Count ? cfg.Ports[i] : null;
+            var blocked = BuildBlockedVlanListFromConfigPort(p);
+            sb.AppendLine($"interface port{i}");
+            sb.AppendLine($" switchport mode {(p?.Mode ?? "access")}");
+            sb.AppendLine($" switchport access vlan {(p?.AccessVlan ?? 1)}");
+            sb.AppendLine($" switchport trunk native vlan {(p?.NativeVlan ?? 1)}");
+            sb.AppendLine($" switchport vlan blocked {(blocked.Length == 0 ? "none" : blocked)}");
+        }
+
+        sb.AppendLine("!");
+        sb.AppendLine("end");
+        return sb.ToString().TrimEnd();
+    }
+
+    private static string CmdShowIpam()
+    {
+        var leases = LeaseStore.GetAllLeases();
+        if (leases.Count == 0)
+        {
+            return "% Warning: no leases";
+        }
+
+        var sb = new StringBuilder();
+        sb.AppendLine("IP               Server               Customer App Source");
+        sb.AppendLine(Divider);
+        for (var i = 0; i < leases.Count; i++)
+        {
+            var lease = leases[i];
+            if (lease == null)
+            {
+                continue;
+            }
+
+            sb.AppendLine($"{lease.Ip,-16} {lease.ServerId,-20} {lease.CustomerId,8} {lease.AppId,3} {lease.Source}");
+        }
+
+        return sb.ToString().TrimEnd();
+    }
+
+    private static string CmdDhcpPoolShow()
+    {
+        var subnets = IpamEngine.GetCurrentSubnets();
+        if (subnets.Count == 0)
+        {
+            IpamEngine.DetectSubnetsFromRuntime();
+            subnets = IpamEngine.GetCurrentSubnets();
+        }
+
+        if (subnets.Count == 0)
+        {
+            return "% Warning: no subnets discovered";
+        }
+
+        var leaseBySubnet = LeaseStore.GetAllLeases()
+            .Where(x => x != null)
+            .GroupBy(x => x.SubnetId ?? "")
+            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase);
+
+        var sb = new StringBuilder();
+        sb.AppendLine("Subnet             Total  Used  Free  Util%");
+        sb.AppendLine(Divider);
+        for (var i = 0; i < subnets.Count; i++)
+        {
+            var s = subnets[i];
+            if (s == null)
+            {
+                continue;
+            }
+
+            var total = s.Pool?.AllowedIps?.Count ?? 0;
+            var used = leaseBySubnet.TryGetValue(s.Id ?? "", out var u) ? u : 0;
+            var free = Math.Max(0, total - used);
+            var util = total <= 0 ? 0f : (float)used / total * 100f;
+            sb.AppendLine($"{s.Cidr,-18} {total,5} {used,5} {free,5} {util,5:0.0}");
+        }
+
+        return sb.ToString().TrimEnd();
+    }
+
     private static string CmdDhcpMode(string[] args, CliSession _)
     {
         if (args.Length < 3)
@@ -416,6 +554,140 @@ public static class SwitchCli
 
         DHCPManager.SetAssignMode(mode);
         return $"DHCP assign mode set to {mode}";
+    }
+
+    private static string CmdDhcpAssign(string[] args, CliSession _)
+    {
+        if (args.Length < 3)
+        {
+            return "% Error: syntax: dhcp assign {serverId}";
+        }
+
+        var serverId = args[2];
+        var servers = UnityEngine.Object.FindObjectsOfType<Server>();
+        var server = servers?.FirstOrDefault(s => s != null && string.Equals(s.serverID, serverId, StringComparison.OrdinalIgnoreCase));
+        if (server == null)
+        {
+            return $"% Error: server not found '{serverId}'";
+        }
+
+        var ok = DHCPManager.AssignDhcpToSingleServer(server);
+        return ok ? $"Assigning IP to {serverId}... done" : $"% Error: DHCP assign failed for {serverId}";
+    }
+
+    private static string CmdDhcpReservationAdd(string[] args, CliSession _)
+    {
+        if (args.Length < 5)
+        {
+            return "% Error: syntax: dhcp reservation add {serverId} {ip} [note]";
+        }
+
+        var serverId = args[3];
+        var ip = args[4];
+        if (!GregIpService.IsValidIp(ip))
+        {
+            return $"% Error: invalid IP '{ip}'";
+        }
+
+        var note = args.Length > 5 ? string.Join(" ", args.Skip(5)) : "";
+        LeaseStore.AddReservation(new DhcpReservation
+        {
+            ReservationId = Guid.NewGuid().ToString("N"),
+            ServerId = serverId,
+            Ip = ip,
+            SubnetId = "",
+            Note = note,
+        });
+
+        return $"Reservation added: {serverId} -> {ip}";
+    }
+
+    private static string CmdDhcpReservationShow(string[] args, CliSession _)
+    {
+        if (args.Length >= 4)
+        {
+            var one = LeaseStore.GetReservation(args[3]);
+            if (one == null)
+            {
+                return $"% Warning: no reservation for {args[3]}";
+            }
+
+            return $"{one.ServerId} -> {one.Ip}" + (string.IsNullOrWhiteSpace(one.Note) ? "" : $" ({one.Note})");
+        }
+
+        var all = LeaseStore.GetAllReservations();
+        if (all.Count == 0)
+        {
+            return "% Warning: no reservations";
+        }
+
+        var sb = new StringBuilder();
+        sb.AppendLine("Server               Reserved IP       Note");
+        sb.AppendLine(Divider);
+        for (var i = 0; i < all.Count; i++)
+        {
+            var r = all[i];
+            if (r == null)
+            {
+                continue;
+            }
+
+            sb.AppendLine($"{r.ServerId,-20} {r.Ip,-16} {r.Note}");
+        }
+
+        return sb.ToString().TrimEnd();
+    }
+
+    private static string CmdDhcpReservationRemove(string[] args, CliSession _)
+    {
+        if (args.Length < 4)
+        {
+            return "% Error: syntax: dhcp reservation remove {serverId}";
+        }
+
+        var removed = LeaseStore.RemoveReservation(args[3]);
+        return removed ? $"Reservation removed for {args[3]}" : $"% Warning: no reservation found for {args[3]}";
+    }
+
+    private static string CmdIpamScan()
+    {
+        IpamEngine.DetectSubnetsFromRuntime();
+        var subnets = IpamEngine.GetCurrentSubnets();
+        var servers = GregServerDiscoveryService.ScanAll();
+        var conflicts = ConflictDetector.DetectAll(servers, subnets);
+        return $"Scanning... done. {servers.Count} servers, {conflicts.Count} conflicts";
+    }
+
+    private static string CmdIpamConflictCheck()
+    {
+        var conflicts = IpamEngine.GetCurrentConflicts();
+        if (conflicts.Count == 0)
+        {
+            var servers = GregServerDiscoveryService.ScanAll();
+            var subnets = IpamEngine.GetCurrentSubnets();
+            conflicts = ConflictDetector.DetectAll(servers, subnets);
+        }
+
+        if (conflicts.Count == 0)
+        {
+            return "✓ No conflicts detected";
+        }
+
+        var sb = new StringBuilder();
+        sb.AppendLine("Type                IP               Affected");
+        sb.AppendLine(Divider);
+        for (var i = 0; i < conflicts.Count; i++)
+        {
+            var c = conflicts[i];
+            if (c == null)
+            {
+                continue;
+            }
+
+            sb.AppendLine($"{c.Type,-18} {(c.Ip ?? ""),-16} {(c.AffectedServerIds?.Count ?? 0)}");
+        }
+
+        return sb.ToString().TrimEnd();
     }
 
     private static string CmdShutdown(bool down)
@@ -524,6 +796,73 @@ public static class SwitchCli
 
         cfg.Ports[_interfacePortIndex] = port;
         return $"Port {_interfacePortIndex} mode set to {mode}";
+    }
+
+    private static string CmdSwitchportVlanAllow(string[] args, CliSession _)
+    {
+        if (!TryGetInterfaceConfig(out _, out _, out var err))
+        {
+            return err;
+        }
+
+        if (args.Length < 4 || !TryParseVlan(args[3], out var vlanId))
+        {
+            return "% Error: syntax: switchport vlan allow {vlanId}";
+        }
+
+        var ok = GregVlanService.AllowVlan(ActiveSwitch, _interfacePortIndex, vlanId);
+        return ok ? $"VLAN {vlanId} allowed on port {_interfacePortIndex}" : "% Error: failed to allow vlan";
+    }
+
+    private static string CmdSwitchportVlanBlock(string[] args, CliSession _)
+    {
+        if (!TryGetInterfaceConfig(out _, out _, out var err))
+        {
+            return err;
+        }
+
+        if (args.Length < 4 || !TryParseVlan(args[3], out var vlanId))
+        {
+            return "% Error: syntax: switchport vlan block {vlanId}";
+        }
+
+        var ok = GregVlanService.BlockVlan(ActiveSwitch, _interfacePortIndex, vlanId);
+        return ok ? $"VLAN {vlanId} blocked on port {_interfacePortIndex}" : "% Error: failed to block vlan";
+    }
+
+    private static string CmdNoSwitchportVlanBlock(string[] args, CliSession _)
+    {
+        if (args.Length < 5)
+        {
+            return "% Error: syntax: no switchport vlan block {vlanId}";
+        }
+
+        var mapped = new[] { "switchport", "vlan", "allow", args[4] };
+        return CmdSwitchportVlanAllow(mapped, Session);
+    }
+
+    private static string CmdSwitchportVlanClear()
+    {
+        if (!TryGetInterfaceConfig(out _, out _, out var err))
+        {
+            return err;
+        }
+
+        var ok = GregVlanService.ClearPortFilters(ActiveSwitch, _interfacePortIndex);
+        return ok ? $"Port {_interfacePortIndex} vlan filters cleared" : "% Error: failed to clear filters";
+    }
+
+    private static string CmdSwitchportVlanShow()
+    {
+        if (!TryGetInterfaceConfig(out _, out _, out var err))
+        {
+            return err;
+        }
+
+        var blocked = GregVlanService.GetDisallowedVlans(ActiveSwitch, _interfacePortIndex);
+        return blocked.Count == 0
+            ? $"Port {_interfacePortIndex} blocked VLANs: none"
+            : $"Port {_interfacePortIndex} blocked VLANs: {string.Join(",", blocked)}";
     }
 
     private static string CmdSwitchportAccessVlan(string[] args, CliSession _)
@@ -763,6 +1102,30 @@ public static class SwitchCli
     {
         vlanId = 0;
         return int.TryParse(token, out vlanId) && vlanId >= MinVlan && vlanId <= MaxVlan;
+    }
+
+    private static string BuildBlockedVlanListFromConfigPort(SwitchPortConfig port)
+    {
+        if (port == null)
+        {
+            return string.Empty;
+        }
+
+        var list = new List<int>();
+        for (var vlan = MinVlan; vlan <= MaxVlan; vlan++)
+        {
+            if (!VlanRuntimeSync.IsVlanAllowedOnPort(port, vlan))
+            {
+                list.Add(vlan);
+            }
+
+            if (list.Count >= 64)
+            {
+                break;
+            }
+        }
+
+        return string.Join(",", list);
     }
 
     private static string BuildPrompt()
