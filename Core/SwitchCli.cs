@@ -1,9 +1,12 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using DHCPSwitches.Models;
 using greg.Sdk.Services;
+using MelonLoader;
 using UnityEngine;
 
 namespace DHCPSwitches;
@@ -12,6 +15,8 @@ public static class SwitchCli
 {
     private const string Divider = "────────────────────────────────────────────────────────";
     private const string ErrorNoActiveSwitch = "% Error: no active switch";
+    private const string PendingFactoryReset = "factory-reset";
+    private const string PendingVlanReset = "vlan-reset";
     private const int MinVlan = 1;
     private const int MaxVlan = 4094;
 
@@ -37,7 +42,10 @@ public static class SwitchCli
         new CliCommand { Name = "show interfaces", Syntax = "show interfaces", Description = "Show all ports", Handler = (_, s) => CmdShowInterfaces() },
         new CliCommand { Name = "show interface", Syntax = "show interface {portIndex}", Description = "Show one interface detail", Handler = CmdShowInterface },
         new CliCommand { Name = "show vlan", Syntax = "show vlan [id]", Description = "Show vlan overview", Handler = CmdShowVlan },
+        new CliCommand { Name = "show ip", Syntax = "show ip", Description = "Show discovered IP endpoints", Handler = (_, s) => CmdShowIp() },
+        new CliCommand { Name = "show neighbors", Syntax = "show neighbors", Description = "Show network neighbors", Handler = (_, s) => CmdShowNeighbors() },
         new CliCommand { Name = "show status", Syntax = "show status", Description = "Show compact switch status", Handler = (_, s) => CmdShowStatus() },
+        new CliCommand { Name = "show flow", Syntax = "show flow", Description = "Show per-port throughput view", Handler = (_, s) => CmdShowFlow() },
         new CliCommand { Name = "show running-config", Syntax = "show running-config", Description = "Show switch running config", Handler = (_, s) => CmdShowRunningConfig() },
         new CliCommand { Name = "show ipam", Syntax = "show ipam", Description = "Show lease view", Handler = (_, s) => CmdShowIpam() },
         new CliCommand { Name = "show dhcp", Syntax = "show dhcp", Description = "Show DHCP runtime mode/status", Handler = (_, s) => CmdShowDhcp() },
@@ -61,11 +69,16 @@ public static class SwitchCli
         new CliCommand { Name = "switchport trunk native vlan", Syntax = "switchport trunk native vlan <id>", Description = "Set trunk native VLAN", Handler = CmdSwitchportTrunkNativeVlan },
         new CliCommand { Name = "switchport trunk allowed vlan", Syntax = "switchport trunk allowed vlan <list|all|none>", Description = "Set trunk allowed list", Handler = CmdSwitchportTrunkAllowedVlan },
         new CliCommand { Name = "vlan", Syntax = "vlan <id>", Description = "Create VLAN in switch database", Handler = CmdVlanCreate },
+        new CliCommand { Name = "vlan reset", Syntax = "vlan reset", Description = "Clear all VLAN filters on active switch", Handler = (_, s) => CmdVlanReset() },
+        new CliCommand { Name = "vlan policy check", Syntax = "vlan policy check", Description = "Check vlan policy violations", Handler = (_, s) => CmdVlanPolicyCheck() },
+        new CliCommand { Name = "vlan policy apply", Syntax = "vlan policy apply {vlanId}", Description = "Apply vlan policy for one VLAN", Handler = CmdVlanPolicyApply },
         new CliCommand { Name = "write memory", Syntax = "write memory", Description = "Save running-config", Aliases = new[] { "copy running-config startup-config" }, Handler = (_, s) => CmdWriteMemory() },
         new CliCommand { Name = "end", Syntax = "end", Description = "Exit config mode", Handler = (_, s) => CmdEnd() },
         new CliCommand { Name = "exit", Syntax = "exit", Description = "Exit current mode", Handler = (_, s) => CmdExit() },
         new CliCommand { Name = "shutdown", Syntax = "shutdown", Description = "Power off active switch", Handler = (_, s) => CmdShutdown(true) },
         new CliCommand { Name = "no shutdown", Syntax = "no shutdown", Description = "Power on active switch", Handler = (_, s) => CmdShutdown(false) },
+        new CliCommand { Name = "reload", Syntax = "reload", Description = "Reload active switch", Handler = (_, s) => CmdReload() },
+        new CliCommand { Name = "factory-reset", Syntax = "factory-reset", Description = "Reset switch config", Handler = (_, s) => CmdFactoryReset() },
         new CliCommand { Name = "update-ui", Syntax = "update-ui", Description = "Refresh switch screen", Handler = (_, s) => CmdUpdateUi() },
     };
 
@@ -79,6 +92,21 @@ public static class SwitchCli
         if (string.IsNullOrWhiteSpace(input))
         {
             return "";
+        }
+
+        if (Session.AwaitingConfirm)
+        {
+            var confirmed = string.Equals(input, "y", StringComparison.OrdinalIgnoreCase)
+                            || string.Equals(input, "yes", StringComparison.OrdinalIgnoreCase);
+            var pending = Session.PendingCommand ?? "";
+            Session.AwaitingConfirm = false;
+            Session.PendingCommand = "";
+            if (!confirmed)
+            {
+                return "% Info: cancelled";
+            }
+
+            return ExecutePendingConfirmed(pending);
         }
 
         History.Add(input);
@@ -103,6 +131,21 @@ public static class SwitchCli
         }
 
         return $"% Error: unknown command '{input}'";
+    }
+
+    private static string ExecutePendingConfirmed(string pending)
+    {
+        if (string.Equals(pending, PendingFactoryReset, StringComparison.OrdinalIgnoreCase))
+        {
+            return CmdFactoryResetConfirmed();
+        }
+
+        if (string.Equals(pending, PendingVlanReset, StringComparison.OrdinalIgnoreCase))
+        {
+            return CmdVlanResetConfirmed();
+        }
+
+        return "% Warning: no pending action";
     }
 
     public static List<string> GetCompletions(string partial)
@@ -272,7 +315,7 @@ public static class SwitchCli
         return sb.ToString().TrimEnd();
     }
 
-    private static string CmdSwitchSelect(string[] args, CliSession _)
+    private static string CmdSwitchSelect(string[] args, CliSession session)
     {
         if (args.Length < 3)
         {
@@ -354,7 +397,7 @@ public static class SwitchCli
         return sb.ToString().TrimEnd();
     }
 
-    private static string CmdShowInterface(string[] args, CliSession _)
+    private static string CmdShowInterface(string[] args, CliSession session)
     {
         if (ActiveSwitch == null)
         {
@@ -385,7 +428,7 @@ public static class SwitchCli
             $"Cable ID:         {(link != null ? link.id.ToString() : "n/a")}");
     }
 
-    private static string CmdShowVlan(string[] args, CliSession _)
+    private static string CmdShowVlan(string[] args, CliSession session)
     {
         if (ActiveSwitch == null)
         {
@@ -416,6 +459,85 @@ public static class SwitchCli
         return sb.ToString().TrimEnd();
     }
 
+    private static string CmdShowIp()
+    {
+        var endpoints = ServerScanAdapter.GetSwitchEndpoints(ActiveSwitch);
+        if (endpoints.Count == 0)
+        {
+            return "% Warning: no servers discovered";
+        }
+
+        var sb = new StringBuilder();
+        sb.AppendLine("Port   Server               IP               Customer App VLAN Source");
+        sb.AppendLine(Divider);
+        for (var i = 0; i < endpoints.Count; i++)
+        {
+            var e = endpoints[i];
+            if (e == null || string.IsNullOrWhiteSpace(e.Ip))
+            {
+                continue;
+            }
+
+            var port = e.PortIndex >= 0 ? e.PortIndex.ToString() : "n/a";
+            sb.AppendLine($"{port,-6} {e.ServerId,-20} {e.Ip,-16} {e.CustomerId,8} {e.AppId,3} {e.VlanId,4} {e.Source}");
+        }
+
+        return sb.ToString().TrimEnd();
+    }
+
+    private static string CmdShowNeighbors()
+    {
+        if (ActiveSwitch == null)
+        {
+            return ErrorNoActiveSwitch;
+        }
+
+        try
+        {
+            var mapType = ActiveSwitch.GetType().Assembly.GetType("NetworkMap") ?? Type.GetType("NetworkMap");
+            if (mapType == null)
+            {
+                return "% Warning: NetworkMap not yet initialized";
+            }
+
+            var instProp = mapType.GetProperty("instance", BindingFlags.Public | BindingFlags.Static)
+                           ?? mapType.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static);
+            var inst = instProp?.GetValue(null);
+            if (inst == null)
+            {
+                return "% Warning: NetworkMap not yet initialized";
+            }
+
+            var adjField = mapType.GetField("adjacencyList", BindingFlags.Public | BindingFlags.Instance | BindingFlags.NonPublic);
+            var adjObj = adjField?.GetValue(inst);
+            if (adjObj is not System.Collections.IEnumerable adj)
+            {
+                return "% Warning: NetworkMap adjacency list unavailable";
+            }
+
+            var sb = new StringBuilder();
+            sb.AppendLine("Neighbor                         Link");
+            sb.AppendLine(Divider);
+            var any = false;
+            foreach (var item in adj)
+            {
+                if (item == null)
+                {
+                    continue;
+                }
+
+                any = true;
+                sb.AppendLine(item.ToString());
+            }
+
+            return any ? sb.ToString().TrimEnd() : "% Warning: no neighbors";
+        }
+        catch (Exception ex)
+        {
+            return "% Warning: show neighbors failed: " + ex.Message;
+        }
+    }
+
     private static string CmdShowStatus()
     {
         if (ActiveSwitch == null)
@@ -426,6 +548,40 @@ public static class SwitchCli
         var ports = ActiveSwitch.cableLinkSwitchPorts?.Count ?? 0;
         var flow = DHCPManager.IsFlowPaused ? "Paused" : "Running";
         return $"{ActiveSwitch.switchId} | {(ActiveSwitch.isOn ? "UP" : "DOWN")} | ports={ports} | Flow={flow} | DHCPMode={DHCPManager.DhcpAssignMode}";
+    }
+
+    private static string CmdShowFlow()
+    {
+        if (ActiveSwitch == null)
+        {
+            return ErrorNoActiveSwitch;
+        }
+
+        var links = ActiveSwitch.cableLinkSwitchPorts;
+        var count = links?.Count ?? 0;
+        var total = 0f;
+        var connected = 0;
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"Flow Status: {(DHCPManager.IsFlowPaused ? "Paused" : "Active")}");
+        sb.AppendLine("Per-Port Speed:");
+        for (var i = 0; i < count; i++)
+        {
+            var l = links[i];
+            var speed = l != null ? l.connectionSpeed : 0f;
+            var isConn = l != null && l.connected;
+            if (isConn)
+            {
+                connected++;
+                total += speed;
+            }
+
+            sb.AppendLine($"  Port {i}: {speed:0.0} Gbps ({(isConn ? "UP" : "DOWN")})");
+        }
+
+        sb.AppendLine($"Total Speed: {total:0.0} Gbps");
+        sb.AppendLine($"Connected Ports: {connected}");
+        return sb.ToString().TrimEnd();
     }
 
     private static string CmdShowDhcp()
@@ -526,7 +682,7 @@ public static class SwitchCli
         return sb.ToString().TrimEnd();
     }
 
-    private static string CmdDhcpMode(string[] args, CliSession _)
+    private static string CmdDhcpMode(string[] args, CliSession session)
     {
         if (args.Length < 3)
         {
@@ -556,7 +712,7 @@ public static class SwitchCli
         return $"DHCP assign mode set to {mode}";
     }
 
-    private static string CmdDhcpAssign(string[] args, CliSession _)
+    private static string CmdDhcpAssign(string[] args, CliSession session)
     {
         if (args.Length < 3)
         {
@@ -575,7 +731,7 @@ public static class SwitchCli
         return ok ? $"Assigning IP to {serverId}... done" : $"% Error: DHCP assign failed for {serverId}";
     }
 
-    private static string CmdDhcpReservationAdd(string[] args, CliSession _)
+    private static string CmdDhcpReservationAdd(string[] args, CliSession session)
     {
         if (args.Length < 5)
         {
@@ -602,7 +758,7 @@ public static class SwitchCli
         return $"Reservation added: {serverId} -> {ip}";
     }
 
-    private static string CmdDhcpReservationShow(string[] args, CliSession _)
+    private static string CmdDhcpReservationShow(string[] args, CliSession session)
     {
         if (args.Length >= 4)
         {
@@ -638,7 +794,7 @@ public static class SwitchCli
         return sb.ToString().TrimEnd();
     }
 
-    private static string CmdDhcpReservationRemove(string[] args, CliSession _)
+    private static string CmdDhcpReservationRemove(string[] args, CliSession session)
     {
         if (args.Length < 4)
         {
@@ -690,6 +846,53 @@ public static class SwitchCli
         return sb.ToString().TrimEnd();
     }
 
+    private static string CmdVlanPolicyCheck()
+    {
+        var violations = VlanPolicyEngine.AnalyzeAll(IpamEngine.GetCurrentSubnets())
+            .Where(v => ActiveSwitch == null || string.Equals(v.SwitchId, ActiveSwitch.switchId, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (violations.Count == 0)
+        {
+            return "✓ All policies compliant";
+        }
+
+        var sb = new StringBuilder();
+        sb.AppendLine("Switch               Port  Expected VLAN  State");
+        sb.AppendLine(Divider);
+        for (var i = 0; i < violations.Count; i++)
+        {
+            var v = violations[i];
+            sb.AppendLine($"{v.SwitchId,-20} {v.PortIndex,4} {v.ExpectedVlanId,13}  {v.ActualState}");
+        }
+
+        return sb.ToString().TrimEnd();
+    }
+
+    private static string CmdVlanPolicyApply(string[] args, CliSession session)
+    {
+        if (args.Length < 4 || !int.TryParse(args[3], out var vlanId) || vlanId <= 0)
+        {
+            return "% Error: syntax: vlan policy apply {vlanId}";
+        }
+
+        var subnets = IpamEngine.GetCurrentSubnets();
+        if (subnets.Count == 0)
+        {
+            IpamEngine.DetectSubnetsFromRuntime();
+            subnets = IpamEngine.GetCurrentSubnets();
+        }
+
+        var subnet = subnets.FirstOrDefault(s => s != null && s.VlanId == vlanId);
+        if (subnet == null)
+        {
+            return $"% Error: no subnet found for vlan {vlanId}";
+        }
+
+        var res = VlanPolicyEngine.ApplySubnetVlanPolicy(subnet);
+        return res?.Summary ?? "% Error: vlan policy apply failed";
+    }
+
     private static string CmdShutdown(bool down)
     {
         if (ActiveSwitch == null)
@@ -728,6 +931,104 @@ public static class SwitchCli
         return "Screen UI refreshed.";
     }
 
+    private static string CmdReload()
+    {
+        if (ActiveSwitch == null)
+        {
+            return ErrorNoActiveSwitch;
+        }
+
+        MelonCoroutines.Start(ReloadSwitchCoroutine(ActiveSwitch));
+        return $"Reloading switch {ActiveSwitch.switchId}...";
+    }
+
+    private static string CmdVlanReset()
+    {
+        if (ActiveSwitch == null)
+        {
+            return ErrorNoActiveSwitch;
+        }
+
+        Session.AwaitingConfirm = true;
+        Session.PendingCommand = PendingVlanReset;
+        return "This clears ALL VLAN filters. Confirm? [y/N]";
+    }
+
+    private static string CmdVlanResetConfirmed()
+    {
+        if (ActiveSwitch == null)
+        {
+            return ErrorNoActiveSwitch;
+        }
+
+        var changed = GregVlanService.ClearAllFilters(ActiveSwitch);
+        return $"VLAN filters cleared on {changed} port(s).";
+    }
+
+    private static IEnumerator ReloadSwitchCoroutine(NetworkSwitch sw)
+    {
+        if (sw == null)
+        {
+            yield break;
+        }
+
+        try
+        {
+            sw.TurnOffCommonFunctions();
+            sw.isOn = false;
+        }
+        catch
+        {
+            // ignored
+        }
+
+        yield return new WaitForSeconds(1f);
+
+        try
+        {
+            sw.isOn = true;
+            sw.TurnOnCommonFunction();
+            sw.UpdateScreenUI();
+        }
+        catch
+        {
+            // ignored
+        }
+    }
+
+    private static string CmdFactoryReset()
+    {
+        if (ActiveSwitch == null)
+        {
+            return ErrorNoActiveSwitch;
+        }
+
+        Session.AwaitingConfirm = true;
+        Session.PendingCommand = PendingFactoryReset;
+        return "This will wipe all config. Confirm? [y/N]";
+    }
+
+    private static string CmdFactoryResetConfirmed()
+    {
+        if (ActiveSwitch == null)
+        {
+            return ErrorNoActiveSwitch;
+        }
+
+        try
+        {
+            var ports = ActiveSwitch.cableLinkSwitchPorts?.Count ?? 0;
+            GregVlanService.ClearAllFilters(ActiveSwitch);
+            DeviceConfigRegistry.EraseSwitchConfig(ActiveSwitch, Math.Max(ports, 0));
+            ActiveSwitch.UpdateScreenUI();
+            return "Factory reset complete.\n" + CmdShowStatus();
+        }
+        catch (Exception ex)
+        {
+            return "% Error: factory-reset failed: " + ex.Message;
+        }
+    }
+
     private static string CmdConfigureTerminal()
     {
         if (ActiveSwitch == null)
@@ -741,7 +1042,7 @@ public static class SwitchCli
         return "Enter configuration commands, one per line. End with CNTL/Z.";
     }
 
-    private static string CmdInterface(string[] args, CliSession _)
+    private static string CmdInterface(string[] args, CliSession session)
     {
         if (!_inConfigMode)
         {
@@ -769,7 +1070,7 @@ public static class SwitchCli
         return $"Configuring interface {portIndex}";
     }
 
-    private static string CmdSwitchportMode(string[] args, CliSession _)
+    private static string CmdSwitchportMode(string[] args, CliSession session)
     {
         if (!TryGetInterfaceConfig(out var cfg, out var port, out var err))
         {
@@ -798,7 +1099,7 @@ public static class SwitchCli
         return $"Port {_interfacePortIndex} mode set to {mode}";
     }
 
-    private static string CmdSwitchportVlanAllow(string[] args, CliSession _)
+    private static string CmdSwitchportVlanAllow(string[] args, CliSession session)
     {
         if (!TryGetInterfaceConfig(out _, out _, out var err))
         {
@@ -814,7 +1115,7 @@ public static class SwitchCli
         return ok ? $"VLAN {vlanId} allowed on port {_interfacePortIndex}" : "% Error: failed to allow vlan";
     }
 
-    private static string CmdSwitchportVlanBlock(string[] args, CliSession _)
+    private static string CmdSwitchportVlanBlock(string[] args, CliSession session)
     {
         if (!TryGetInterfaceConfig(out _, out _, out var err))
         {
@@ -830,7 +1131,7 @@ public static class SwitchCli
         return ok ? $"VLAN {vlanId} blocked on port {_interfacePortIndex}" : "% Error: failed to block vlan";
     }
 
-    private static string CmdNoSwitchportVlanBlock(string[] args, CliSession _)
+    private static string CmdNoSwitchportVlanBlock(string[] args, CliSession session)
     {
         if (args.Length < 5)
         {
@@ -865,7 +1166,7 @@ public static class SwitchCli
             : $"Port {_interfacePortIndex} blocked VLANs: {string.Join(",", blocked)}";
     }
 
-    private static string CmdSwitchportAccessVlan(string[] args, CliSession _)
+    private static string CmdSwitchportAccessVlan(string[] args, CliSession session)
     {
         if (!TryGetInterfaceConfig(out var cfg, out var port, out var err))
         {
@@ -888,7 +1189,7 @@ public static class SwitchCli
         return $"Port {_interfacePortIndex} access vlan set to {vlanId}";
     }
 
-    private static string CmdSwitchportTrunkNativeVlan(string[] args, CliSession _)
+    private static string CmdSwitchportTrunkNativeVlan(string[] args, CliSession session)
     {
         if (!TryGetInterfaceConfig(out var cfg, out var port, out var err))
         {
@@ -906,7 +1207,7 @@ public static class SwitchCli
         return $"Port {_interfacePortIndex} native vlan set to {vlanId}";
     }
 
-    private static string CmdSwitchportTrunkAllowedVlan(string[] args, CliSession _)
+    private static string CmdSwitchportTrunkAllowedVlan(string[] args, CliSession session)
     {
         if (!TryGetInterfaceConfig(out var cfg, out var port, out var err))
         {
@@ -935,7 +1236,7 @@ public static class SwitchCli
         return $"Port {_interfacePortIndex} trunk allowed list set to '{port.AllowedVlanRaw}'";
     }
 
-    private static string CmdVlanCreate(string[] args, CliSession _)
+    private static string CmdVlanCreate(string[] args, CliSession session)
     {
         if (!_inConfigMode)
         {

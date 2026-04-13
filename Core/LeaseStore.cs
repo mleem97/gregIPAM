@@ -75,6 +75,29 @@ public static class LeaseStore
         return Reservations.FirstOrDefault(x => x.ServerId == serverId);
     }
 
+    public static List<DhcpReservation> GetAllReservations()
+    {
+        return new List<DhcpReservation>(Reservations);
+    }
+
+    public static bool RemoveReservation(string serverId)
+    {
+        if (string.IsNullOrWhiteSpace(serverId))
+        {
+            return false;
+        }
+
+        var before = Reservations.Count;
+        Reservations.RemoveAll(x => string.Equals(x.ServerId, serverId, StringComparison.OrdinalIgnoreCase));
+        if (Reservations.Count == before)
+        {
+            return false;
+        }
+
+        Save();
+        return true;
+    }
+
     private static void Save()
     {
         GregPersistenceService.Save(ModName, LeaseKey, Leases);
